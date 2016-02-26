@@ -10,3 +10,4 @@
     - registry
     - jenkins
     - jenkins-node
+    - nginx

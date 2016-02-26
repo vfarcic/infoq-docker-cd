@@ -3,8 +3,7 @@
     dest: "{{ item }}"
     state: directory
     owner: vagrant
-  with_items: directories
-  when: nginx is defined
+  with_items: "{{ directories }}"
   tags: [nginx]
 
 - name: Container is running
@@ -14,14 +13,13 @@
     state: running
     ports: "{{ ports }}"
     volumes: "{{ volumes }}"
-  when: nginx is defined
   tags: [nginx]
 
 - name: Files are present
   copy:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
-  with_items: files
+  with_items: "{{ files }}"
   register: result
   tags: [nginx]
 

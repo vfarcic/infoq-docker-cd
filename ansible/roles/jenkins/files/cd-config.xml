@@ -13,7 +13,7 @@
         <maxNumRetries>0</maxNumRetries>
         <retryWaitTime>0</retryWaitTime>
     </launcher>
-    <label>cd</label>
+    <label>cd build test</label>
     <nodeProperties/>
     <userId>anonymous</userId>
 </slave>

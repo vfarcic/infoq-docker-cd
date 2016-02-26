@@ -1,7 +1,7 @@
 - name: Directories are created
   file:
     path: "{{ item }}"
-    state: directory
+    state: "{{ directory }}"
   with_items: directories
   tags: [consul]
 
@@ -10,7 +10,7 @@
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     mode: "{{ item.mode }}"
-  with_items: files
+  with_items: "{{ files }}"
   tags: [consul]
 
 - name: Is running
