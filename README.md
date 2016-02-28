@@ -19,10 +19,82 @@ and Firefox. The service source code and all dependencies are there as well. I'm
 
 The diagram just got a bit more complex.
 
-![More elaborated testing phase of the continuous deployment flow](img/cd-flow-simple-pre-deployment-tests.png)
+![Testing phase of a simple continuous deployment flow](img/cd-flow-pre-deployment-tests.png)
+
+Building
+========
+
+Now that we run all kinds of tests, we can build the container that will, ultimately, be deployed to production. Since it is likelly that it will be deployed to a different server than the one where we are building it, we should also push it to a Docker registry.
+
+![Building phase of a simple continuous deployment flow](img/cd-flow-build.png)
+
+Finally, once we tested and built the new release, we are ready to deploy it to the production server. All we have to do is pull the images and run the container.
+
+![Deployment phase of a simple continuous deployment flow](img/cd-flow-deploy.png)
+
+Deploying
+=========
+
+That's it. We have our continuous deployment flow defined. We can start deploying our microservices after each commit and deliver new features to our users faster than ever. Business is happy and start showing us with awards and we go home knowing that we did something truly great and useful.
+
+**The end**
 
 
 
 
-Show the final Dockerfile(s)
-Show the final pipeline
+
+
+The truth is that what we defined thus far is far from a complete continuous deployment flow. There are quite a few steps missing, things to consider, and paths to take. Let's start identifying and tackling problems one by one.
+
+Safely Deploying Through Blue-Green Process
+===========================================
+
+Probably the most dangerous step we did is deployment. If we pull a new release and run it Docker Compose will replace the old with the new one. There will be some downtime. Docker needs to stop the old release, start the new one and your service needs to initialize. No matter whether this process lasts for a few minutes, few seconds, or even less than that, there is still some downtime. If you adopt microservices and continuous deployment, releases will be coming more often than before. You will be, eventually, deploying multiple times a day. No matter how often you release, interruption is always something that should be avoided.
+
+The solution lies in *blue-green* deployments. If you are new to it, please read the [Blue-Green Deployment](http://technologyconversations.com/2016/02/08/blue-green-deployment/) article. In a nutshell, the process deploys a new release in parallel with the old one. One is called *blue* and the other is called *green*. Since both are running in parallel, there is no downtime (at least not due to the deployment process). Running both releases in parallel opens some new possibilities, but also creates a few challenges we haven't had before.
+
+The first thing to consider when practicing blue-green deployment is how to redirect users traffic from the old release to the new one. Before we were simply replacing one release with the other so both would be running on the same server and the same port. Now, since both are running in parallel, ports need to be different. Chances are your are already using some kind of a proxy service (nginx, HAProxy, and so on). The new challenge is that the proxy cannot be static any more. It's configuration is continuously changing with each new release. If we are deploying to a cluster, things get even more complicated. Not only that ports are changing but also IPs. In order to use a cluster effectivelly, services should be deployed to a server that is most suited at that moment. The criteria that decides which server is most suited should be based on available memory, type of hard disk, CPU, and so on. That way, we can distribute services in a much better way and greatly optimize the usage of our available resources. That poses two problems. The first one is how to find out IPs and ports of services we are deploying. The answer lies in service discovery.
+
+In a nutshell, service discovery consists of three parts. We need a service registry where we store service information. Then, we need to have a process in place that will register new services and de-register those that are stopped. Finally, we need to have a way to retrieve service information. For example, when we deploy a new release, registration process should store the IP and the port in service registry. Later on, nginx can discover that information and use it to reconfigure itself. Some of the commonly used tools are *etcd*, *Consul*, and *Zookeeper* as registry, *Registrator* for registering and de-registering services, and *confd*, and *Consul Template* for service discovery and templating. For more information about service discovery and those tools, please read the [Service Discovery: Zookeeper vs etcd vs Consul](http://technologyconversations.com/2015/09/08/service-discovery-zookeeper-vs-etcd-vs-consul/) article.
+
+Now that we have a mechanism to store and retrieve service information and can use it to reconfigure the proxy, the only question left unanswered (for now) is which color to deploy. When deploying manually, we know that the previous color was, for example, green and that the next one should be blue. When everything is automated, we need to have that information stored somewhere and available from the deployment flow. Since we already established that service discovery as part of the process, we can register the color together with service IP and port and retrieve that information when needed.
+
+Having all that into the account, the flow is as displayed in the following diagram. Since the number of steps is increasing, I split them into pre-deployment, deployment, and post-deployment groups.
+
+![Blue-green deployment and service discovery](img/cd-flow-deploy-bg.png)
+
+Running Pre-Integration and Post-Integration Tests
+==================================================
+
+You might have noticed that the first step in the deployment flow was to run tests. While they are very important and give us confidence that the code is (probably) working as expected, they do not verify that the service we deployed to production is truly working as expected. There are many things that could have gone wrong. Maybe we did not set up database correctly, maybe firewalls are preventing access to the service, and so on. The list of things that might prevent the service from working correctly in production is far from short. The fact that we think that our code is working as expected is not the same as verification whether what we deployed is properly configured. Even if we set up a staging server, deploy our service inside it, and run another round of tests, cannot give us full confidence that the same results will always be found in production. In order to distinguish different types of tests, we'll call those we defined earlier *pre-deployment tests*. I'm intentionally avoiding to give them more concrete name since the type of tests you'll run in this early stage depends from one project to another. They can be unit tests, functional tests, and so on. No matter the type, what they all have in common is that they are run before the service is built and deployed.
+
+The blue-green process we defined earlier opens a new opportunity. Since both the old and the new release of the same service is running in parallel, we have a window of opportunity to test the later before we reconfigure the proxy to point to it. That way, we can safelly deploy the new release to production and test it while, at the same time, our users will continue being redirected to the old release through the proxy. I tend to call them *pre-integration tests*. The name might not be the best one since many are used to a different meaning of the word *integration tests*. In this specific case, it means that those tests are run before the integration of the new release with the proxy service (before the proxy is re-configured). Those tests allow us to skip staging environments (they are never fully the same as production) and test the new release under *exactly* the same setting as the one users will be using when proxy is re-configured. Well, the word *exactly* is not fully accurate because the only difference is that we'll test the service without the proxy and our users should not be allowed to access it by any other way but through it. As with pre-deployment tests, the result of pre-integration tests can be a signal to proceed with the flow or to abort the process in case of a failure.
+
+Finally, after we re-configure the proxy, we should run another run of testing, this time called *post-integration tests*. Those should be very fast since the only thing left to verify is whether proxy was indeed configured correctly. That usually means only a few tests that make a requests on ports 80 (*HTTP*) and 443 (*HTTPS*). As with any other type of tests, they can be successful or failed.
+
+Please note that, once we adopt Docker, those tests should all be run as containers, in the same way we run pre-deployment testing. The benefits are the same and, in many cases, the same testing container can be used for all testing types. I tend to simply pass and environment variable that indicates which types of tests should be run.
+
+![Pre-integration and post-integration testing steps](img/cd-flow-post-deployment-tests.png)
+
+Rolling Back and Cleaning Up
+============================
+
+Before we revisit *OK* and *failure* outcomes of the tests steps, let us define the desired state of the production environment. The logic is simple. If any part of the flow fails, the environment should be in exactly the same state as if the process was not even initiated. Apart from triggering some form of notifications of the problem and creating a culture where fixing the culprit is of utmost importance and priority, there is not much more to be done. The problem is that rollback is often not as easy as it sounds. Fortunately, Docker containers make that task easier than any other approach since there are very few side effects on the environment itself.
+
+The decision what to do with *pre-deployment tests* results is easy. Nothing was deployed so we can either continue with the flow or stop it. On the other hand, the steps executed before we reached the result of *pre-integration tests* did leave the production environment in an undesirable state. The new release (blue or green) has been deployed and should be removed. That removal should be followed by removal of any data generated by that release. Since, at that point, proxy is still pointing to the old release, our users will continue using it and continue their lives oblivious that any attempt to deploy new features has been made. The last set of tests adds additional obstacles. Since proxy has been changed to point to the new release, such a change needs to be reverted. The same holds true for the registration of the color that was deployed.
+
+Please note that we discussed only failures cause by tests. That does not mean that other steps of the flow cannot fail. They can and the similar logic should be applied. No matter what fails, the environment needs to be reverted to the state it was before.
+
+Even if everything went as planned, there is still some cleaning up to be done. The old release should be stopped and de-registered.
+
+![Rollback and clean up stage](img/cd-flow-rollback-cleanup.png)
+
+I skipped mentioning databases. They probably pose the major challenge during the rollback stage. The subject is too big for an article so I'll just state, what I consider to be the main rule. Always make sure that schema changes that accompany the new release are backwards compatible and make sure that there is an extensive set of tests that confirms it. They must be run during the *pre-deployment tests* phase or the risk of reaching the point with no return is too big. I often receive complains that backwards compatibility is not feasible. While that is true in some cases, more often than not, that opinion comes from the waterfall era when teams were making releases once a month or even once a year. If deployment flow cycle is short and is performed on every commit (assuming that we do not commit less often than once a day), the changes that should be applied to databases as, generally, small enough that backwards compatibility can be accomplished with relative ease.
+
+TODO
+====
+
+* Discuss where is each step run
+* Explain that some of the pieces (but not all) are parts of Kubernetes and Mesos
+* Show the final Dockerfile(s)
+* Show the final pipeline
